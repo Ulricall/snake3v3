@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 import random
-from agent.rl.submission import agent, get_observations
+from agent.mappo.submission import get_observations_mappo, agent_mappo
+from agent.rl.submission import get_observations, agent_rl
 from env.chooseenv import make
 from tabulate import tabulate
 import argparse
@@ -18,10 +19,15 @@ def get_actions(state, algo, indexs):
     # rl agent
     if algo == 'rl':
         obs = get_observations(state, indexs, obs_dim=26, height=10, width=20)
-        logits = agent.choose_action(obs)
+        logits = agent_rl.choose_action(obs)
         logits = torch.Tensor(logits)
         actions = np.array([Categorical(out).sample().item() for out in logits])
-
+    elif algo == 'mappo':
+        obs = get_observations_mappo(state, indexs, obs_dim=26, height=10, width=20)
+        logits = agent_mappo.choose_action(obs)
+        logits = torch.Tensor(logits)
+        actions = np.array([Categorical(out).sample().item() for out in logits])
+    
     return actions
 
 

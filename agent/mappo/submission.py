@@ -1,11 +1,9 @@
 import os
-from pathlib import Path
 import sys
 import torch
+import numpy as np
 from torch import nn
 from torch.distributions import Categorical
-import numpy as np
-
 
 HIDDEN_SIZE=256
 device =  torch.device("cpu")
@@ -19,7 +17,6 @@ _str_to_activation = {
     'identity': nn.Identity(),
     'softmax': nn.Softmax(dim=-1),
 }
-
 
 def mlp(sizes,
         activation: Activation = 'relu',
@@ -35,15 +32,12 @@ def mlp(sizes,
         layers += [nn.Linear(sizes[i], sizes[i + 1]), act]
     return nn.Sequential(*layers)
 
-
 def get_surrounding(state, width, height, x, y):
     surrounding = [state[(y - 1) % height][x],  # up
                    state[(y + 1) % height][x],  # down
                    state[y][(x - 1) % width],  # left
                    state[y][(x + 1) % width]]  # right
-
     return surrounding
-
 
 def make_grid_map(board_width, board_height, beans_positions:list, snakes_positions:dict):
     snakes_map = [[[0] for _ in range(board_width)] for _ in range(board_height)]
@@ -56,12 +50,7 @@ def make_grid_map(board_width, board_height, beans_positions:list, snakes_positi
 
     return snakes_map
 
-
-# Self position:        0:head_x; 1:head_y
-# Head surroundings:    2:head_up; 3:head_down; 4:head_left; 5:head_right
-# Beans positions:      (6, 7) (8, 9) (10, 11) (12, 13) (14, 15)
-# Other snake positions: (16, 17) (18, 19) (20, 21) (22, 23) (24, 25) -- (other_x - self_x, other_y - self_y)
-def get_observations(state, agents_index, obs_dim, height, width):
+def get_observations_mappo(state, agents_index, obs_dim, height, width):
     state_copy = state.copy()
     board_width = state_copy['board_width']
     board_height = state_copy['board_height']
@@ -97,7 +86,6 @@ def get_observations(state, agents_index, obs_dim, height, width):
         observations[i][16:] = snake_heads.flatten()[:]
     return observations
 
-
 class Actor(nn.Module):
     def __init__(self, obs_dim, act_dim, num_agents, args, output_activation='softmax'):
         super().__init__()
@@ -120,14 +108,14 @@ class Actor(nn.Module):
         return out
 
 
-class RLAgent(object):
-    def __init__(self, obs_dim, act_dim, num_agent):
+class MAPPOAgent:
+    def __init__(self, obs_dim, act_dim, num_agents):
         self.obs_dim = obs_dim
         self.act_dim = act_dim
-        self.num_agent = num_agent
-        self.device = device
+        self.num_agents = num_agents
+        self.device = 'cpu'
         self.output_activation = 'softmax'
-        self.actor = Actor(obs_dim, act_dim, num_agent, self.output_activation).to(self.device)
+        self.actor = Actor(obs_dim, act_dim, num_agents, self.output_activation).to(self.device)
 
     def choose_action(self, obs):
         obs = torch.Tensor([obs]).to(self.device)
@@ -151,24 +139,23 @@ def to_joint_action(action, ctrl_index):
     joint_action_.append(each)
     return joint_action_
 
-
 def logits2action(logits):
     logits = torch.Tensor(logits).to(device)
     actions = np.array([Categorical(out).sample().item() for out in logits])
     return np.array(actions)
 
-agent_rl = RLAgent(26, 4, 3)
-actor_net = os.path.dirname(os.path.abspath(__file__)) + "/actor_2000.pth"
-agent_rl.load_model(actor_net)
+agent_mappo = MAPPOAgent(26, 4, 3)
+actor_net = os.path.dirname(os.path.abspath(__file__)) + "/actor_500.pth"
+agent_mappo.load_model(actor_net)
 
 def my_controller(observation_list, action_space_list, is_act_continuous):
     obs_dim = 26
     obs = observation_list.copy()
     board_width = obs['board_width']
     board_height = obs['board_height']
-    o_index = obs['controlled_snake_index']  # 2, 3, 4, 5, 6, 7 -> indexs = [0,1,2,3,4,5]
+    o_index = obs['controlled_snake_index'] 
     o_indexs_min = 3 if o_index > 4 else 0
     indexs = [o_indexs_min, o_indexs_min+1, o_indexs_min+2]
-    observation = get_observations(obs, indexs, obs_dim, height=board_height, width=board_width)
-    actions = agent_rl.select_action_to_env(observation, indexs.index(o_index-2))
+    observation = get_observations_mappo(obs, indexs, obs_dim, height=board_height, width=board_width)
+    actions = agent_mappo.select_action_to_env(observation, indexs.index(o_index-2))
     return actions

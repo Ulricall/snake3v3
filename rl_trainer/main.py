@@ -81,10 +81,12 @@ def main(args):
             # ================================== inference ========================================
             # For each agents i, select and execute action a:t,i = a:i,θ(s_t) + Nt
             logits = model.choose_action(obs)
+            # print(logits)
 
             # ============================== add opponent actions =================================
             # we use rule-based greedy agent here. Or, you can switch to random agent.
             actions = logits_greedy(state_to_training, logits, height, width)
+            # print(actions)
             # actions = logits_random(act_dim, logits)
 
             # Receive reward [r_t,i]i=1~n and observe new state s_t+1
@@ -111,6 +113,7 @@ def main(args):
                     step_reward = get_reward(info, ctrl_agent_index, reward, score=0)
 
             done = np.array([done] * ctrl_agent_num)
+            print(done)
 
             # ================================== collect data ========================================
             # Store transition in R
