@@ -7,8 +7,19 @@ import sys
 base_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(base_dir))
 from replay_buffer import ReplayBuffer
-from common import soft_update, hard_update, device
+from common import soft_update, hard_update, device, logits_greedy
 from algo.network import Actor, Critic
+import torch.nn.functional as F
+
+def compute_advantage(gamma, lmbda, td_delta):
+    td_delta = td_delta.detach().numpy()
+    advantage_list = []
+    advantage = 0.0
+    for delta in td_delta[::-1]:
+        advantage = gamma * lmbda * advantage + delta
+        advantage_list.append(advantage)
+    advantage_list.reverse()
+    return torch.tensor(advantage_list, dtype=torch.float)
 
 class MAPPO:
     def __init__(self, obs_dim, act_dim, num_agent, args):
@@ -23,15 +34,13 @@ class MAPPO:
         self.gamma = args.gamma
         self.clip_epsilon = args.clip_epsilon
         self.output_activation = args.output_activation
+        self.lmbda = args.lmbda
+        self.epochs = 20
 
         self.actor = Actor(obs_dim, act_dim, num_agent, args, self.output_activation).to(self.device)
-        self.actor_target = Actor(obs_dim, act_dim, num_agent, args, self.output_activation).to(self.device)
         self.critic = Critic(obs_dim, act_dim, num_agent, args).to(self.device)
-        self.critic_target = Critic(obs_dim, act_dim, num_agent, args).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=self.a_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.c_lr)
-        hard_update(self.actor, self.actor_target)
-        hard_update(self.critic, self.critic_target)
 
         self.replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size)
         self.eps = 1
@@ -47,55 +56,45 @@ class MAPPO:
         return action_distribution.squeeze(0)
 
     def update(self):
-        with torch.autograd.set_detect_anomaly(True):
-            if len(self.replay_buffer) < self.batch_size:
-                return None, None
-            # Sample a mini-batch of M transitions from memory
-            state_batch, action_batch, reward_batch, next_state_batch, done_batch, log_probs_batch = self.replay_buffer.get_batches()
+        if len(self.replay_buffer) < self.batch_size:
+            return None, None
+        # Sample a mini-batch of M transitions from memory
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch, log_probs_batch = self.replay_buffer.get_batches()
 
-            state_batch = torch.Tensor(state_batch).reshape(self.batch_size, 3, -1).to(self.device)
-            action_batch = torch.Tensor(action_batch).reshape(self.batch_size, 3, -1).to(self.device)
-            reward_batch = torch.Tensor(reward_batch).reshape(self.batch_size, 3, -1).to(self.device)
-            next_state_batch = torch.Tensor(next_state_batch).reshape(self.batch_size, 3, -1).to(self.device)
-            done_batch = torch.Tensor(done_batch).reshape(self.batch_size, 3, 1).to(self.device)
-            log_probs_batch = torch.Tensor(log_probs_batch).reshape(self.batch_size, 3, -1).to(self.device)
+        state_batch = torch.Tensor(state_batch).reshape(self.batch_size, 3, -1).to(self.device)
+        action_batch = torch.Tensor(action_batch).reshape(self.batch_size, 3, -1).to(self.device)
+        reward_batch = torch.Tensor(reward_batch).reshape(self.batch_size, 3, -1).to(self.device)
+        next_state_batch = torch.Tensor(next_state_batch).reshape(self.batch_size, 3, -1).to(self.device)
+        done_batch = torch.Tensor(done_batch).reshape(self.batch_size, 3, 1).to(self.device)
+        # log_probs_batch = torch.Tensor(log_probs_batch).reshape(self.batch_size, 3, -1).to(self.device)
+        action_taken = torch.argmax(action_batch, dim=2).unsqueeze(2).detach()
+        take_action = torch.as_tensor(action_taken.clone().detach(), dtype=torch.int64)
+        # print(take_action.shape)
 
-            with torch.no_grad():
-                target_next_actions = self.actor_target(next_state_batch)
-                next_value = self.critic_target(next_state_batch, target_next_actions)
-                target_value = reward_batch[:,:,0].unsqueeze(2) + self.gamma * next_value * (1 - done_batch)
+        target = reward_batch[:,:,0].unsqueeze(2) + self.gamma * self.critic(next_state_batch, action_batch) * (1 - done_batch)
+        target_delta = target - self.critic(state_batch, action_batch)
+        advantage = compute_advantage(self.gamma, self.lmbda, target_delta.cpu()).to(self.device)
+        pi_old = torch.log(self.actor(state_batch).gather(2, take_action)).detach()
 
-            # Update the critic
-            # print(state_batch.shape, action_batch.shape)
-            value = self.critic(state_batch, action_batch)
-            loss_critic = torch.nn.MSELoss()(target_value, value)
+        for _ in range(self.epochs):
+            pi_new = torch.log(self.actor(state_batch).gather(2, take_action))
+            ratio = torch.exp(pi_new - pi_old)
+
+            act1 = ratio * advantage
+            act2 = torch.clamp(ratio, 1-self.eps, 1+self.eps) * advantage
+            loss_actor = torch.mean(-torch.min(act1, act2))
+            loss_critic = torch.mean(F.mse_loss(self.critic(state_batch, action_batch), target.detach()))
 
             self.critic_optimizer.zero_grad()
             loss_critic.backward()
-            clip_grad_norm_(self.critic.parameters(), 1)
+            # clip_grad_norm_(self.critic.parameters(), 1)
             self.critic_optimizer.step()
-
-            new_logits = self.actor(state_batch.detach().clone())
-            new_actions = torch.argmax(new_logits, dim=2)
-            new_log_probs = torch.log(torch.stack([new_logits[_].gather(1, new_actions[_].unsqueeze(0)) for _ in range(self.batch_size)], dim=0)).unsqueeze(0)
-            ratio = torch.exp(new_log_probs - log_probs_batch)
-            advantage = target_value.detach() - value.detach()
-            loss_actor_1 = ratio * advantage
-            loss_actor_2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantage
-            loss_actor = -torch.min(loss_actor_1, loss_actor_2).mean()
-
             self.actor_optimizer.zero_grad()
             loss_actor.backward()
-            clip_grad_norm_(self.actor.parameters(), 1)
+            # clip_grad_norm_(self.actor.parameters(), 1)
             self.actor_optimizer.step()
 
-            self.c_loss = loss_critic.item()
-            self.a_loss = loss_actor.item()
-
-            soft_update(self.actor, self.actor_target, self.tau)
-            soft_update(self.critic, self.critic_target, self.tau)
-
-            return self.c_loss, self.a_loss
+        return None, None
 
     def get_loss(self):
         return self.c_loss, self.a_loss

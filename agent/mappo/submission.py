@@ -145,7 +145,7 @@ def logits2action(logits):
     return np.array(actions)
 
 agent_mappo = MAPPOAgent(26, 4, 3)
-actor_net = os.path.dirname(os.path.abspath(__file__)) + "/actor_500.pth"
+actor_net = os.path.dirname(os.path.abspath(__file__)) + "/actor_2000.pth"
 agent_mappo.load_model(actor_net)
 
 def my_controller(observation_list, action_space_list, is_act_continuous):
@@ -158,4 +158,5 @@ def my_controller(observation_list, action_space_list, is_act_continuous):
     indexs = [o_indexs_min, o_indexs_min+1, o_indexs_min+2]
     observation = get_observations_mappo(obs, indexs, obs_dim, height=board_height, width=board_width)
     actions = agent_mappo.select_action_to_env(observation, indexs.index(o_index-2))
+    print(actions)
     return actions

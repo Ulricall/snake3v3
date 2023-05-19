@@ -65,27 +65,43 @@ def main(args):
         while True:
             # Select action a_t and observe reward r_t and new state s_{t+1}
             logits = model.choose_action(obs)
+            print(logits)
             action = logits_greedy(state_to_training, logits, height, width)
             # print(action)
             # print(torch.tensor(action[0:3], dtype=torch.int64))
-            log_prob = torch.log(logits.gather(1, torch.tensor(action[0:3], dtype=torch.int64).unsqueeze(0)))
+            # log_prob = torch.log(logits.gather(1, torch.tensor(action[0:3], dtype=torch.int64).unsqueeze(0)))
+            log_prob = None
             next_state, reward, done, _, info = env.step(env.encode(action))
             next_state_to_training = next_state[0]
             next_obs = get_observations(next_state_to_training, ctrl_agent_index, obs_dim, height, width)
-            done = np.array([done] * ctrl_agent_num)
-            model.replay_buffer.push(obs, logits.detach().numpy(), reward, next_obs, done, log_prob.detach().cpu().numpy() if log_prob is not None else None)
 
+            reward = np.array(reward)
             episode_reward += reward
+            if done:
+                if np.sum(episode_reward[:3]) > np.sum(episode_reward[3:]):
+                    step_reward = get_reward(info, ctrl_agent_index, reward, score=1)
+                elif np.sum(episode_reward[:3]) < np.sum(episode_reward[3:]):
+                    step_reward = get_reward(info, ctrl_agent_index, reward, score=2)
+                else:
+                    step_reward = get_reward(info, ctrl_agent_index, reward, score=0)
+            else:
+                if np.sum(episode_reward[:3]) > np.sum(episode_reward[3:]):
+                    step_reward = get_reward(info, ctrl_agent_index, reward, score=3)
+                elif np.sum(episode_reward[:3]) < np.sum(episode_reward[3:]):
+                    step_reward = get_reward(info, ctrl_agent_index, reward, score=4)
+                else:
+                    step_reward = get_reward(info, ctrl_agent_index, reward, score=0)
+
+            done = np.array([done] * ctrl_agent_num)
+            model.replay_buffer.push(obs, logits.detach().numpy(), step_reward, next_obs, done, log_prob.detach().cpu().numpy() if log_prob is not None else None)
             step += 1
             obs = next_obs
+            state_to_training = next_state_to_training
+            model.update()
 
             # Update agent networks every update_interval steps
-            if step % args.update_interval == 0:
-                model.update()
-                # if model.c_loss and model.a_loss:
-                #     print(f'\t\t\t\ta_loss {model.a_loss:.3f} c_loss {model.c_loss:.3f}')
-                if (episode % args.save_interval == 0):
-                    model.save_model(run_dir, episode)
+            if (episode % args.save_interval == 0):
+                model.save_model(run_dir, episode)
 
             if True in done:
                 break
@@ -102,6 +118,7 @@ if __name__ == '__main__':
     parser.add_argument('--buffer_size', default=int(1e5), type=int)
     parser.add_argument('--tau', default=0.001, type=float)
     parser.add_argument('--gamma', default=0.95, type=float)
+    parser.add_argument('--lmbda', default=0.98, type=float)
     parser.add_argument('--seed', default=1, type=int)
     parser.add_argument('--a_lr', default=0.0001, type=float)
     parser.add_argument('--c_lr', default=0.0001, type=float)

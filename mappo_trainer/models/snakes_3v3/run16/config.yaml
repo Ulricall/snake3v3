@@ -13,7 +13,7 @@ lmbda: 0.98
 load_model: false
 load_model_run: 2
 load_model_run_episode: 4000
-log_dir: '20230518_165600'
+log_dir: '20230518_171118'
 max_episodes: 200
 model_episode: 0
 output_activation: softmax
