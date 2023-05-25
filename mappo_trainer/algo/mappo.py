@@ -43,14 +43,19 @@ class MAPPO:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.c_lr)
 
         self.replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size)
-        self.eps = 0.1
-        self.decay_speed = 0.95
+        self.eps = 0.5
+        self.decay_speed = 0.9999
     
     def choose_action(self, obs):
         if (type(obs) == np.ndarray):
             obs = torch.Tensor([obs]).to(self.device)
-        action_distribution = self.actor(obs.detach().clone()).squeeze(0)
-        action_distribution = action_distribution.detach().numpy()
+        p = np.random.random()
+        if p > self.eps:
+            action_distribution = self.actor(obs.detach().clone()).squeeze(0)
+            action_distribution = action_distribution.detach().numpy()
+        else:
+            action_distribution = np.random.uniform(low=0, high=1, size=(3, 4))
+        self.eps *= self.decay_speed
         return action_distribution
     
     def take_action(self, state):
@@ -93,7 +98,7 @@ class MAPPO:
             ratio = torch.exp(pi_new - pi_old)
 
             act1 = ratio * advantage
-            act2 = torch.clamp(ratio, 1-self.eps, 1+self.eps) * advantage
+            act2 = torch.clamp(ratio, 1-self.clip_epsilon, 1+self.clip_epsilon) * advantage
             loss_actor = torch.mean(-torch.min(act1, act2))
             loss_critic = torch.mean(F.mse_loss(self.critic(state_batch, action_batch), target.detach()))
 
