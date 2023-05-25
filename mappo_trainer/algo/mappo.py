@@ -43,41 +43,53 @@ class MAPPO:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.c_lr)
 
         self.replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size)
-        self.eps = 1
+        self.eps = 0.1
         self.decay_speed = 0.95
-        self.c_loss = None
-        self.a_loss = None
     
     def choose_action(self, obs):
         if (type(obs) == np.ndarray):
             obs = torch.Tensor([obs]).to(self.device)
-        action_distribution = self.actor(obs.detach().clone())
-
-        return action_distribution.squeeze(0)
+        action_distribution = self.actor(obs.detach().clone()).squeeze(0)
+        action_distribution = action_distribution.detach().numpy()
+        return action_distribution
+    
+    def take_action(self, state):
+        # state = torch.tensor([state], dtype=torch.float).to(self.device)
+        probs = self.actor(state)
+        action_dist = torch.distributions.Categorical(probs)
+        action = action_dist.sample()
+        # print(action)
+        return action
 
     def update(self):
         if len(self.replay_buffer) < self.batch_size:
             return None, None
         # Sample a mini-batch of M transitions from memory
-        state_batch, action_batch, reward_batch, next_state_batch, done_batch, log_probs_batch = self.replay_buffer.get_batches()
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch, action_taken_batch = self.replay_buffer.get_batches()
 
         state_batch = torch.Tensor(state_batch).reshape(self.batch_size, 3, -1).to(self.device)
         action_batch = torch.Tensor(action_batch).reshape(self.batch_size, 3, -1).to(self.device)
-        reward_batch = torch.Tensor(reward_batch).reshape(self.batch_size, 3, -1).to(self.device)
+        reward_batch = torch.Tensor(reward_batch).reshape(self.batch_size, 3, 1).to(self.device)
         next_state_batch = torch.Tensor(next_state_batch).reshape(self.batch_size, 3, -1).to(self.device)
         done_batch = torch.Tensor(done_batch).reshape(self.batch_size, 3, 1).to(self.device)
-        # log_probs_batch = torch.Tensor(log_probs_batch).reshape(self.batch_size, 3, -1).to(self.device)
-        action_taken = torch.argmax(action_batch, dim=2).unsqueeze(2).detach()
-        take_action = torch.as_tensor(action_taken.clone().detach(), dtype=torch.int64)
-        # print(take_action.shape)
 
-        target = reward_batch[:,:,0].unsqueeze(2) + self.gamma * self.critic(next_state_batch, action_batch) * (1 - done_batch)
+        action_taken = torch.Tensor(action_taken_batch).reshape(self.batch_size, 3, 1).to(self.device)
+        # action_taken = torch.argmax(action_batch, dim=2).unsqueeze(2).detach()
+        # action_dist = torch.distributions.Categorical(action_batch)
+        # action_taken = action_dist.sample().unsqueeze(-1)
+        # action_taken = self.take_action(state_batch).unsqueeze(-1)
+        take_action = torch.as_tensor(action_taken.clone().detach(), dtype=torch.int64)
+
+        # print(reward_batch.shape)
+        target = reward_batch + self.gamma * self.critic(next_state_batch, action_batch) * (1 - done_batch)
         target_delta = target - self.critic(state_batch, action_batch)
         advantage = compute_advantage(self.gamma, self.lmbda, target_delta.cpu()).to(self.device)
-        pi_old = torch.log(self.actor(state_batch).gather(2, take_action)).detach()
+        pi_old = torch.log(self.actor(state_batch).gather(2, take_action) + 1e-9).detach()
 
+       # print("Epoch start:")
         for _ in range(self.epochs):
-            pi_new = torch.log(self.actor(state_batch).gather(2, take_action))
+            pi_new = torch.log(self.actor(state_batch).gather(2, take_action) + 1e-9)
+            # print(pi_new[0])
             ratio = torch.exp(pi_new - pi_old)
 
             act1 = ratio * advantage
@@ -85,13 +97,14 @@ class MAPPO:
             loss_actor = torch.mean(-torch.min(act1, act2))
             loss_critic = torch.mean(F.mse_loss(self.critic(state_batch, action_batch), target.detach()))
 
+            # print(loss_actor, loss_critic)
             self.critic_optimizer.zero_grad()
             loss_critic.backward()
-            # clip_grad_norm_(self.critic.parameters(), 1)
+            clip_grad_norm_(self.critic.parameters(), 1)
             self.critic_optimizer.step()
             self.actor_optimizer.zero_grad()
             loss_actor.backward()
-            # clip_grad_norm_(self.actor.parameters(), 1)
+            clip_grad_norm_(self.actor.parameters(), 1)
             self.actor_optimizer.step()
 
         return None, None

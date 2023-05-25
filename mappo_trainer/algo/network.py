@@ -6,7 +6,6 @@ from common import *
 
 HIDDEN_SIZE = 256
 
-
 class Actor(nn.Module):
     def __init__(self, obs_dim, act_dim, num_agents, args, output_activation='tanh'):
         super().__init__()
@@ -38,7 +37,6 @@ class Actor(nn.Module):
 
         if self.args.algo == "bicnet":
             out = self.comm_net(out)
-
         out = self.post_dense(out)
         return out
 

@@ -43,7 +43,7 @@ def main(args):
     writer = SummaryWriter(str(log_dir))
     save_config(args, log_dir)
 
-    model = MAPPO(obs_dim, act_dim, 6, args)
+    model = MAPPO(obs_dim, act_dim, 3, args)
 
     if args.load_model:
         load_dir = os.path.join(os.path.dirname(run_dir), "run" + str(args.load_model_run))
@@ -52,7 +52,7 @@ def main(args):
     episode = 0
 
     while episode < args.max_episodes:
-
+        # print(episode)
         # Receive initial observation state s1
         state = env.reset()
         state_to_training = state[0]
@@ -63,14 +63,13 @@ def main(args):
         episode_reward = np.zeros(6)
 
         while True:
-            # Select action a_t and observe reward r_t and new state s_{t+1}
             logits = model.choose_action(obs)
-            print(logits)
+            # action_dist = torch.distributions.Categorical(logits)
+            # action = action_dist.sample()
             action = logits_greedy(state_to_training, logits, height, width)
             # print(action)
-            # print(torch.tensor(action[0:3], dtype=torch.int64))
             # log_prob = torch.log(logits.gather(1, torch.tensor(action[0:3], dtype=torch.int64).unsqueeze(0)))
-            log_prob = None
+            # log_prob = None
             next_state, reward, done, _, info = env.step(env.encode(action))
             next_state_to_training = next_state[0]
             next_obs = get_observations(next_state_to_training, ctrl_agent_index, obs_dim, height, width)
@@ -93,7 +92,7 @@ def main(args):
                     step_reward = get_reward(info, ctrl_agent_index, reward, score=0)
 
             done = np.array([done] * ctrl_agent_num)
-            model.replay_buffer.push(obs, logits.detach().numpy(), step_reward, next_obs, done, log_prob.detach().cpu().numpy() if log_prob is not None else None)
+            model.replay_buffer.push(obs, logits, step_reward, next_obs, done, action[0:3])
             step += 1
             obs = next_obs
             state_to_training = next_state_to_training
@@ -120,8 +119,8 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', default=0.95, type=float)
     parser.add_argument('--lmbda', default=0.98, type=float)
     parser.add_argument('--seed', default=1, type=int)
-    parser.add_argument('--a_lr', default=0.0001, type=float)
-    parser.add_argument('--c_lr', default=0.0001, type=float)
+    parser.add_argument('--a_lr', default=1e-4, type=float)
+    parser.add_argument('--c_lr', default=1e-4, type=float)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--epsilon', default=0.5, type=float)
     parser.add_argument('--epsilon_speed', default=0.99998, type=float)
