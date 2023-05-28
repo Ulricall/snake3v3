@@ -38,7 +38,7 @@ class MAPPO:
         self.epochs = 20
 
         self.actor = Actor(obs_dim, act_dim, num_agent, args, self.output_activation).to(self.device)
-        self.critic = Critic(obs_dim, act_dim, num_agent, args).to(self.device)
+        self.critic = Critic(obs_dim, 0, num_agent, args).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=self.a_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.c_lr)
 
@@ -86,8 +86,8 @@ class MAPPO:
         take_action = torch.as_tensor(action_taken.clone().detach(), dtype=torch.int64)
 
         # print(reward_batch.shape)
-        target = reward_batch + self.gamma * self.critic(next_state_batch, action_batch) * (1 - done_batch)
-        target_delta = target - self.critic(state_batch, action_batch)
+        target = reward_batch + self.gamma * self.critic(next_state_batch) * (1 - done_batch)
+        target_delta = target - self.critic(state_batch)
         advantage = compute_advantage(self.gamma, self.lmbda, target_delta.cpu()).to(self.device)
         pi_old = torch.log(self.actor(state_batch).gather(2, take_action) + 1e-9).detach()
 
@@ -100,7 +100,7 @@ class MAPPO:
             act1 = ratio * advantage
             act2 = torch.clamp(ratio, 1-self.clip_epsilon, 1+self.clip_epsilon) * advantage
             loss_actor = torch.mean(-torch.min(act1, act2))
-            loss_critic = torch.mean(F.mse_loss(self.critic(state_batch, action_batch), target.detach()))
+            loss_critic = torch.mean(F.mse_loss(self.critic(state_batch), target.detach()))
 
             # print(loss_actor, loss_critic)
             self.critic_optimizer.zero_grad()

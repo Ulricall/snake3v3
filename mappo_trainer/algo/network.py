@@ -64,8 +64,11 @@ class Critic(nn.Module):
         self.prev_dense = mlp(sizes_prev)
         self.post_dense = mlp(sizes_post)
 
-    def forward(self, obs_batch, action_batch):
-        out = torch.cat((obs_batch, action_batch), dim=-1)
+    def forward(self, obs_batch, action_batch=None):
+        if (self.act_dim == 0):
+            out = obs_batch
+        else:
+            out = torch.cat((obs_batch, action_batch), dim=-1)
         out = self.prev_dense(out)
 
         if self.args.algo == "bicnet":

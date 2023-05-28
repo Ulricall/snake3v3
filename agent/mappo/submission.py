@@ -145,7 +145,7 @@ def logits2action(logits):
     return np.array(actions)
 
 agent_mappo = MAPPOAgent(26, 4, 3)
-actor_net = os.path.dirname(os.path.abspath(__file__)) + "/actor_20.pth"
+actor_net = os.path.dirname(os.path.abspath(__file__)) + "/actor_30.pth"
 agent_mappo.load_model(actor_net)
 
 def my_controller(observation_list, action_space_list, is_act_continuous):
