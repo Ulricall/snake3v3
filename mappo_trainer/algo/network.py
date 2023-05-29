@@ -19,8 +19,6 @@ class Actor(nn.Module):
         middle_prev = [HIDDEN_SIZE, HIDDEN_SIZE]
         sizes_post = [HIDDEN_SIZE << 1, HIDDEN_SIZE, act_dim]
 
-        self.prev_dense = mlp(sizes_prev)
-
         if self.args.algo == "bicnet":
             self.comm_net = LSTMNet(HIDDEN_SIZE, HIDDEN_SIZE)
             sizes_post = [HIDDEN_SIZE << 1, HIDDEN_SIZE, act_dim]
@@ -31,8 +29,13 @@ class Actor(nn.Module):
 
         self.prev_dense = mlp(sizes_prev)
         self.post_dense = mlp(sizes_post, output_activation=output_activation)
+        # self.rnn = nn.GRU(input_size=obs_dim, hidden_size=HIDDEN_SIZE, bidirectional=True)
+        # self.h0 = 
 
     def forward(self, obs_batch):
+        # out, hn = self.rnn(obs_batch)
+        # sf = nn.Softmax(dim=-1)
+        # out = sf(out)
         out = self.prev_dense(obs_batch)
 
         if self.args.algo == "bicnet":
@@ -63,6 +66,7 @@ class Critic(nn.Module):
 
         self.prev_dense = mlp(sizes_prev)
         self.post_dense = mlp(sizes_post)
+        # self.rnn = nn.GRU(input_size=obs_dim, hidden_size=HIDDEN_SIZE, bidirectional=True)
 
     def forward(self, obs_batch, action_batch=None):
         if (self.act_dim == 0):
@@ -75,6 +79,9 @@ class Critic(nn.Module):
             out = self.comm_net(out)
 
         out = self.post_dense(out)
+        # print(out.shape)
+        norm_layer = nn.BatchNorm1d(num_features=3)
+        out = norm_layer(out)
         return out
 
 

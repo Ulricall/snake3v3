@@ -12,6 +12,7 @@ from log_path import *
 from env.chooseenv import make
 from algo.mappo import MAPPO
 from common import soft_update, hard_update, device
+import matplotlib.pyplot as plt
 
 def main(args):
     print("==algo: ", args.algo)
@@ -50,6 +51,7 @@ def main(args):
         model.load_model(load_dir, episode=args.load_model_run_episode)
 
     episode = 0
+    rus = []
 
     while episode < args.max_episodes:
         # print(episode)
@@ -61,11 +63,10 @@ def main(args):
         episode += 1
         step = 0
         episode_reward = np.zeros(6)
+        step_reward_list = []
 
         while True:
             logits = model.choose_action(obs)
-            # action_dist = torch.distributions.Categorical(logits)
-            # action = action_dist.sample()
             action = logits_greedy(state_to_training, logits, height, width)
             # print(action)
             # log_prob = torch.log(logits.gather(1, torch.tensor(action[0:3], dtype=torch.int64).unsqueeze(0)))
@@ -91,6 +92,7 @@ def main(args):
                 else:
                     step_reward = get_reward(info, ctrl_agent_index, reward, score=0)
 
+            step_reward_list.append(np.mean(step_reward))
             done = np.array([done] * ctrl_agent_num)
             model.replay_buffer.push(obs, logits, step_reward, next_obs, done, action[0:3])
             step += 1
@@ -104,13 +106,17 @@ def main(args):
 
             if True in done:
                 break
+        
+        rus.append(sum(step_reward_list)/len(step_reward_list))
+        print(sum(step_reward_list)/len(step_reward_list))
+    plt.plot(rus)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--game_name', default="snakes_3v3", type=str)
     parser.add_argument('--algo', default="mappo", type=str)
-    parser.add_argument('--max_episodes', default=50000, type=int)
+    parser.add_argument('--max_episodes', default=100, type=int)
     parser.add_argument('--episode_length', default=200, type=int)
     parser.add_argument('--output_activation', default="softmax", type=str, help="tanh/softmax")
 
@@ -123,10 +129,10 @@ if __name__ == '__main__':
     parser.add_argument('--c_lr', default=1e-4, type=float)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--epsilon', default=0.5, type=float)
-    parser.add_argument('--epsilon_speed', default=0.99998, type=float)
+    parser.add_argument('--epsilon_speed', default=0.9999, type=float)
     parser.add_argument("--clip_epsilon", default=0.1, type=float)
 
-    parser.add_argument("--save_interval", default=1000, type=int)
+    parser.add_argument("--save_interval", default=10, type=int)
     parser.add_argument("--model_episode", default=0, type=int)
     parser.add_argument('--log_dir', default=datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
 

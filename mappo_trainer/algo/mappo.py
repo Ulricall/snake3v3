@@ -35,7 +35,7 @@ class MAPPO:
         self.clip_epsilon = args.clip_epsilon
         self.output_activation = args.output_activation
         self.lmbda = args.lmbda
-        self.epochs = 20
+        self.epochs = 10
 
         self.actor = Actor(obs_dim, act_dim, num_agent, args, self.output_activation).to(self.device)
         self.critic = Critic(obs_dim, 0, num_agent, args).to(self.device)
@@ -43,8 +43,8 @@ class MAPPO:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.c_lr)
 
         self.replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size)
-        self.eps = 0.5
-        self.decay_speed = 0.9999
+        self.eps = args.epsilon
+        self.decay_speed = args.epsilon_speed
     
     def choose_action(self, obs):
         if (type(obs) == np.ndarray):
@@ -85,8 +85,11 @@ class MAPPO:
         # action_taken = self.take_action(state_batch).unsqueeze(-1)
         take_action = torch.as_tensor(action_taken.clone().detach(), dtype=torch.int64)
 
-        # print(reward_batch.shape)
-        target = reward_batch + self.gamma * self.critic(next_state_batch) * (1 - done_batch)
+        normalize = torch.nn.BatchNorm1d(num_features=3)
+        normed_reward_batch = normalize(reward_batch)
+        # print(reward_batch)
+
+        target = normed_reward_batch + self.gamma * self.critic(next_state_batch) * (1 - done_batch)
         target_delta = target - self.critic(state_batch)
         advantage = compute_advantage(self.gamma, self.lmbda, target_delta.cpu()).to(self.device)
         pi_old = torch.log(self.actor(state_batch).gather(2, take_action) + 1e-9).detach()
